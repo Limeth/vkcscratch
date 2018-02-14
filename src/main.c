@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -373,12 +374,13 @@ int main(int argc, char *argv[]) {
     BAIL_ON_BAD_RESULT(vkCreateDescriptorSetLayout(
                 device, &descriptorSetLayoutCreateInfo, NULL, &descriptorSetLayout));
 
+    VkDescriptorSetLayout descriptorSetLayouts[] = { descriptorSetLayout };
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext = NULL,
         .flags = 0,
         .setLayoutCount = 1,
-        .pSetLayouts = &descriptorSetLayout,
+        .pSetLayouts = descriptorSetLayouts,
         .pushConstantRangeCount = 0,
         .pPushConstantRanges = NULL,
     };
@@ -406,7 +408,137 @@ int main(int argc, char *argv[]) {
 
     VkPipeline pipelines[1];
     VkComputePipelineCreateInfo computePipelineCreateInfos[] = { computePipelineCreateInfo };
-    BAIL_ON_BAD_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, computePipelineCreateInfos, NULL, pipelines))
+    BAIL_ON_BAD_RESULT(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, computePipelineCreateInfos, NULL, pipelines));
+
+    VkCommandPoolCreateInfo commandPoolCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .queueFamilyIndex = queueFamilyPropertiesIndex,
+    };
+
+    VkDescriptorPoolSize descriptorPoolSize = {
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 2,
+    };
+
+    VkDescriptorPoolSize descriptorPoolSizes[] = { descriptorPoolSize };
+    VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .maxSets = 1,
+        .poolSizeCount = 1,
+        .pPoolSizes = descriptorPoolSizes,
+    };
+
+    VkDescriptorPool descriptorPool;
+    BAIL_ON_BAD_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCreateInfo, NULL, &descriptorPool));
+
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = NULL,
+        .descriptorPool = descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = descriptorSetLayouts,
+    };
+
+    VkDescriptorSet descriptorSets[1];
+    BAIL_ON_BAD_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo, descriptorSets));
+
+    VkDescriptorBufferInfo inputDescriptorBufferInfo = {
+        .buffer = inputBuffer,
+        .offset = 0,
+        .range = VK_WHOLE_SIZE,
+    };
+
+    VkDescriptorBufferInfo outputDescriptorBufferInfo = {
+        .buffer = outputBuffer,
+        .offset = 0,
+        .range = VK_WHOLE_SIZE,
+    };
+
+    VkWriteDescriptorSet writeDescriptorSet[2] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = NULL,
+            .dstSet = descriptorSets[0],
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pImageInfo = NULL,
+            .pBufferInfo = &inputDescriptorBufferInfo,
+            .pTexelBufferView = NULL,
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .pNext = NULL,
+            .dstSet = descriptorSets[0],
+            .dstBinding = 1,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pImageInfo = NULL,
+            .pBufferInfo = &outputDescriptorBufferInfo,
+            .pTexelBufferView = NULL,
+        },
+    };
+
+    vkUpdateDescriptorSets(device, 2, writeDescriptorSet, 0, NULL);
+
+    VkCommandPool commandPool;
+    BAIL_ON_BAD_RESULT(vkCreateCommandPool(device, &commandPoolCreateInfo, NULL, &commandPool));
+
+    VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = NULL,
+        .commandPool = commandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+
+    VkCommandBuffer commandBuffer;
+    BAIL_ON_BAD_RESULT(vkAllocateCommandBuffers(device, &commandBufferAllocateInfo, &commandBuffer));
+
+    VkCommandBufferBeginInfo commandBufferBeginInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = NULL,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = NULL,
+    };
+
+    BAIL_ON_BAD_RESULT(vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo));
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[0]);
+
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, descriptorSets, 0, NULL);
+
+    vkCmdDispatch(commandBuffer, bufferSize / sizeof(int32_t), 1, 1);
+
+    BAIL_ON_BAD_RESULT(vkEndCommandBuffer(commandBuffer));
+
+    VkCommandBuffer commandBuffers[] = { commandBuffer };
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = NULL,
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = NULL,
+        .pWaitDstStageMask = NULL,
+        .commandBufferCount = 1,
+        .pCommandBuffers = commandBuffers,
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = NULL,
+    };
+
+    BAIL_ON_BAD_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+    BAIL_ON_BAD_RESULT(vkQueueWaitIdle(queue));
+    BAIL_ON_BAD_RESULT(vkMapMemory(device, memory, 0, memorySize, 0, (void**) &payload));
+
+    for (uint32_t i = 0, len = bufferSize / sizeof(int32_t); i < len; i++) {
+        /* printf("input: %u; output: %u\n", payload[i], payload[i + len]); */
+        assert(payload[i + len] == payload[i]);
+    }
 
     return 0;
 }
