@@ -1,0 +1,18 @@
+#version 450
+#extension GL_ARB_separate_shader_objects: enable
+#define BUFFER_LENGTH 16384
+
+layout (local_size_x = 1) in;
+
+layout(set = 0, binding = 0) buffer InputData {
+    int[BUFFER_LENGTH] array;
+} input_data;
+
+layout(set = 0, binding = 1) buffer OutputData {
+    int[BUFFER_LENGTH] array;
+} output_data;
+
+void main() {
+    output_data.array[gl_GlobalInvocationID.x] =
+        input_data.array[gl_GlobalInvocationID.x];
+}

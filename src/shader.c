@@ -75,8 +75,8 @@ const uint32_t shader[] = {
     (2 << 16) | OP_CAPABILITY, 1, 
     // OpMemoryModel Logical Simple
     (3 << 16) | OP_MEMORY_MODEL, 0, 0, 
-    // OpEntryPoint GLCompute %FUNC_ID "f" %IN_ID %OUT_ID
-    (4 << 16) | OP_ENTRY_POINT, 5, FUNC_ID, 0x00000066,
+    // OpEntryPoint GLCompute %FUNC_ID "main %IN_ID %OUT_ID
+    (5 << 16) | OP_ENTRY_POINT, 5, FUNC_ID, 0x6e69616d, 0,
     // OpExecutionMode %FUNC_ID LocalSize 1 1 1
     (6 << 16) | OP_EXECUTION_MODE, FUNC_ID, 17, 1, 1, 1,
     // next declare decorations
@@ -119,8 +119,43 @@ const uint32_t shader[] = {
     (1 << 16) | OP_FUNCTION_END,
 };
 
-void shaderLoad(uint32_t *shaderSize, uint32_t **shaderData) {
+void shaderLoadOld(uint32_t *shaderSize, uint32_t **shaderData) {
     *shaderSize = sizeof(shader);
     *shaderData = malloc(*shaderSize);
     memcpy(*shaderData, shader, *shaderSize);
+}
+
+const char* shaderPath = "shader/shader.spv";
+
+void shaderLoad(uint32_t *shaderSize, uint32_t **shaderData) {
+    /* shaderLoadOld(shaderSize, shaderData); return; */
+    FILE *file = fopen(shaderPath, "rb");
+
+    if (file == NULL) {
+        fprintf(stderr, "Could not read the shader from `%s`.\n", shaderPath);
+        exit(1);
+    }
+
+    fseek(file, 0, SEEK_END);
+
+    *shaderSize = ftell(file);
+
+    if ((*shaderSize) % 4 != 0) {
+        fprintf(stderr, "Shader size must be a multiple of 4 (in bytes).\n");
+        fclose(file);
+        exit(1);
+    }
+
+    fseek(file, 0, SEEK_SET);
+
+    *shaderData = malloc(*shaderSize);
+
+    if (*shaderData == NULL) {
+        fprintf(stderr, "Could not allocate memory for the shader.\n");
+        fclose(file);
+        exit(1);
+    }
+
+    fread(*shaderData, *shaderSize, 1, file);
+    fclose(file);
 }

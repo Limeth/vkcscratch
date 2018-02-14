@@ -398,7 +398,7 @@ int main(int argc, char *argv[]) {
             .flags = 0,
             .stage = VK_SHADER_STAGE_COMPUTE_BIT,
             .module = shaderModule,
-            .pName = "f", // entry point name of the shader for this stage
+            .pName = "main", // entry point name of the shader for this stage
             .pSpecializationInfo = NULL,
         },
         .layout = pipelineLayout,
