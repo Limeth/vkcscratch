@@ -121,5 +121,6 @@ const uint32_t shader[] = {
 
 void shaderLoad(uint32_t *shaderSize, uint32_t **shaderData) {
     *shaderSize = sizeof(shader);
-    memcpy(shaderData, shader, *shaderSize);
+    *shaderData = malloc(*shaderSize);
+    memcpy(*shaderData, shader, *shaderSize);
 }

@@ -112,6 +112,62 @@ uint32_t chooseMemoryTypeIndex(VkPhysicalDeviceMemoryProperties *physicalDeviceM
     exit(1);
 }
 
+static void appendPrefix(size_t *prefixLen, char *prefix, char character) {
+    if (*prefixLen > 0) {
+        prefix[(*prefixLen)++] = '|';
+    }
+
+    prefix[(*prefixLen)++] = character;
+}
+
+static void buildPrefix(VkDebugReportFlagsEXT *flags, size_t *prefixLen, char *prefix, VkDebugReportFlagBitsEXT bit, char character) {
+    if ((*flags & bit) == bit) {
+        appendPrefix(prefixLen, prefix, character);
+
+        *flags -= bit;
+    }
+}
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+        VkDebugReportFlagsEXT flags,
+        VkDebugReportObjectTypeEXT objType,
+        uint64_t obj,
+        size_t location,
+        int32_t code,
+        const char *layerPrefix,
+        const char *msg,
+        void *userData) {
+    size_t prefixLen = 0;
+    char prefix[12]; // max 5 items, max 1 unknown item, max 5 separators, zero byte
+
+    buildPrefix(&flags, &prefixLen, prefix, VK_DEBUG_REPORT_INFORMATION_BIT_EXT, 'I');
+    buildPrefix(&flags, &prefixLen, prefix, VK_DEBUG_REPORT_WARNING_BIT_EXT, 'W');
+    buildPrefix(&flags, &prefixLen, prefix, VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT, 'P');
+    buildPrefix(&flags, &prefixLen, prefix, VK_DEBUG_REPORT_ERROR_BIT_EXT, 'E');
+    buildPrefix(&flags, &prefixLen, prefix, VK_DEBUG_REPORT_DEBUG_BIT_EXT, 'D');
+
+    if (flags != 0) {
+        appendPrefix(&prefixLen, prefix, '?');
+    }
+
+    prefix[prefixLen] = '\0';
+
+    printf("[%s] %s\n", prefix, msg);
+
+    return VK_FALSE;
+}
+
+// Extensions need to be loaded manually
+VkResult loadVkCreateDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback) {
+    PFN_vkCreateDebugReportCallbackEXT func = (PFN_vkCreateDebugReportCallbackEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT");
+
+    if (func != NULL) {
+        return func(instance, pCreateInfo, pAllocator, pCallback);
+    } else {
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+}
+
 int main(int argc, char *argv[]) {
     printf("Hello, world.\n");
 
@@ -125,8 +181,19 @@ int main(int argc, char *argv[]) {
         .apiVersion = VK_MAKE_VERSION(1, 0, 65),
     };
     const char *enabledLayerNames[] = { "VK_LAYER_LUNARG_standard_validation" };
-    /* TODO: Check for layer availability */
-    // TODO add debug callbacks
+    const char *enabledExtensionNames[] = { VK_EXT_DEBUG_REPORT_EXTENSION_NAME };
+    const VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfoEXT = {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
+        .pNext = NULL,
+        .flags = VK_DEBUG_REPORT_INFORMATION_BIT_EXT
+            | VK_DEBUG_REPORT_WARNING_BIT_EXT
+            | VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT
+            | VK_DEBUG_REPORT_ERROR_BIT_EXT
+            | VK_DEBUG_REPORT_DEBUG_BIT_EXT,
+        .pfnCallback = debugCallback,
+        .pUserData = NULL,
+
+    };
     const VkInstanceCreateInfo instanceCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pNext = NULL,
@@ -134,12 +201,15 @@ int main(int argc, char *argv[]) {
         .pApplicationInfo = &applicationInfo,
         .enabledLayerCount = 1,
         .ppEnabledLayerNames = enabledLayerNames,
-        .enabledExtensionCount = 0,
-        .ppEnabledExtensionNames = NULL,
+        .enabledExtensionCount = 1,
+        .ppEnabledExtensionNames = enabledExtensionNames,
     };
 
     VkInstance instance;
     BAIL_ON_BAD_RESULT(vkCreateInstance(&instanceCreateInfo, 0, &instance));
+
+    VkDebugReportCallbackEXT debugReportCallbackEXT;
+    BAIL_ON_BAD_RESULT(loadVkCreateDebugReportCallbackEXT(instance, &debugReportCallbackCreateInfoEXT, NULL, &debugReportCallbackEXT));
 
     uint32_t physicalDeviceCount;
     BAIL_ON_BAD_RESULT(vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL));
@@ -238,10 +308,22 @@ int main(int argc, char *argv[]) {
 
     VkBuffer inputBuffer;
     BAIL_ON_BAD_RESULT(vkCreateBuffer(device, &bufferCreateInfo, NULL, &inputBuffer));
+
+    // TODO ensure alignment
+    VkMemoryRequirements inputBufferMemoryRequirements;
+    vkGetBufferMemoryRequirements(device, inputBuffer, &inputBufferMemoryRequirements);
+    printf("input { size: %lu, alignment: %lu }\n", inputBufferMemoryRequirements.size, inputBufferMemoryRequirements.alignment);
+
     BAIL_ON_BAD_RESULT(vkBindBufferMemory(device, inputBuffer, memory, 0));
 
     VkBuffer outputBuffer;
     BAIL_ON_BAD_RESULT(vkCreateBuffer(device, &bufferCreateInfo, NULL, &outputBuffer));
+
+    // TODO ensure alignment
+    VkMemoryRequirements outputBufferMemoryRequirements;
+    vkGetBufferMemoryRequirements(device, outputBuffer, &outputBufferMemoryRequirements);
+    printf("output { size: %lu, alignment: %lu }\n", outputBufferMemoryRequirements.size, outputBufferMemoryRequirements.alignment);
+
     BAIL_ON_BAD_RESULT(vkBindBufferMemory(device, outputBuffer, memory, bufferSize));
 
     uint32_t shaderSize;
@@ -257,12 +339,10 @@ int main(int argc, char *argv[]) {
         .pCode = shaderData,
     };
 
-    printf("DERP\n");
+    printf("shader { size: %u, last: %u }\n", shaderSize, shaderData[shaderSize / sizeof(uint32_t) - 1] - 65536);
 
     VkShaderModule shaderModule;
     BAIL_ON_BAD_RESULT(vkCreateShaderModule(device, &shaderModuleCreateInfo, 0, &shaderModule));
-
-    printf("DERP\n");
 
     VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[2] = {
         (VkDescriptorSetLayoutBinding) {
